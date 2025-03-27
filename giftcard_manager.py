@@ -1,6 +1,7 @@
 import pandas as pd
 import psycopg2
 import os
+import requests
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -13,6 +14,11 @@ DB_CONFIG = {
     'port': '5432',
     'sslmode': 'require'
 }
+
+# Configuração da Nuvemshop
+NUVEMSHOP_TOKEN = "SEU_ACCESS_TOKEN"  # Substitua pelo access_token obtido
+NUVEMSHOP_STORE_ID = "SEU_STORE_ID"  # Substitua pelo user_id obtido
+NUVEMSHOP_API_URL = f"https://api.nuvemshop.com.br/v1/{NUVEMSHOP_STORE_ID}/orders"
 
 app = FastAPI()
 
@@ -120,19 +126,77 @@ def verificar_dados():
     finally:
         conn.close()
 
+def obter_pedidos_nuvemshop():
+    headers = {
+        "Authentication": f"bearer {NUVEMSHOP_TOKEN}",
+        "Content-Type": "application/json",
+        "User-Agent": "GiftCardApp (seuemail@exemplo.com)"  # Substitua pelo seu e-mail
+    }
+    try:
+        response = requests.get(NUVEMSHOP_API_URL, headers=headers, params={"status": "paid"})
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        print(f"Erro ao obter pedidos da Nuvemshop: {str(e)}")
+        return []
+
+def associar_gift_card(pedido_id, cliente_nome, cliente_email):
+    conn = conectar_db()
+    if conn is None:
+        raise HTTPException(status_code=500, detail="Erro ao conectar ao banco")
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT codigo FROM gift_cards WHERE status = 'disponivel' LIMIT 1;")
+            gift_card = cur.fetchone()
+            if not gift_card:
+                raise HTTPException(status_code=404, detail="Nenhum gift card disponível")
+
+            codigo = gift_card[0]
+            cur.execute('''
+                INSERT INTO pedidos (pedido_id, cliente_nome, cliente_email, codigo_enviado, status)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (pedido_id) DO NOTHING;
+            ''', (pedido_id, cliente_nome, cliente_email, codigo, 'enviado'))
+            cur.execute("UPDATE gift_cards SET status = 'usado' WHERE codigo = %s;", (codigo,))
+            conn.commit()
+            return {"pedido_id": pedido_id, "codigo_enviado": codigo}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Erro ao associar gift card: {str(e)}")
+    finally:
+        conn.close()
+
 # Endpoints da API
 @app.get("/")
 def root():
+    print("Recebida requisição para /")
     return {"message": "API de Gift Cards rodando!"}
 
 @app.post("/upload-planilha/")
 def upload_planilha(arquivo: str = "gift_cards.xlsx"):
+    print(f"Recebida requisição para /upload-planilha/ com arquivo: {arquivo}")
     return processar_planilha(arquivo)
 
 @app.get("/gift-cards/")
 def listar_gift_cards():
+    print("Recebida requisição para /gift-cards/")
     gift_cards = verificar_dados()
     return gift_cards
+
+@app.get("/monitorar-pedidos/")
+def monitorar_pedidos():
+    pedidos = obter_pedidos_nuvemshop()
+    resultados = []
+    for pedido in pedidos:
+        pedido_id = str(pedido["id"])
+        cliente_nome = pedido["customer"]["name"]
+        cliente_email = pedido["customer"]["email"]
+        try:
+            resultado = associar_gift_card(pedido_id, cliente_nome, cliente_email)
+            resultados.append(resultado)
+        except HTTPException as e:
+            print(f"Erro ao processar pedido {pedido_id}: {str(e)}")
+    return {"processados": resultados}
 
 if __name__ == "__main__":
     criar_tabelas()
@@ -141,4 +205,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Erro ao processar planilha no início: {str(e)}")
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)  # Mudança para porta 8001
+    uvicorn.run(app, host="127.0.0.1", port=8001)
