@@ -1,5 +1,9 @@
+processar_planilha(r"C:\Users\MKT_PC1_L1\Desktop\CardCod\cardcod\gift_cards.xlsx")
+
+
 import pandas as pd
 import psycopg2
+from psycopg2 import sql
 
 # Configuração do banco de dados no Neon
 DB_CONFIG = {
@@ -26,12 +30,9 @@ def criar_tabelas():
         cur.execute('''
             CREATE TABLE IF NOT EXISTS gift_cards (
                 id SERIAL PRIMARY KEY,
-                sku VARCHAR(50) UNIQUE NOT NULL,
-                nome_produto VARCHAR(255) NOT NULL,
-                tipo_produto VARCHAR(50) NOT NULL,
-                duracao VARCHAR(20) NOT NULL,
-                status VARCHAR(20) DEFAULT 'não usado',
-                historico_uso TEXT DEFAULT 'Não usado'
+                codigo VARCHAR(16) UNIQUE NOT NULL,
+                item VARCHAR(255) NOT NULL,
+                status VARCHAR(20) DEFAULT 'disponivel'
             );
         ''')
         conn.commit()
@@ -46,11 +47,9 @@ def processar_planilha(arquivo):
         for _, row in df.iterrows():
             try:
                 cur.execute('''
-                    INSERT INTO gift_cards (sku, nome_produto, tipo_produto, duracao, status, historico_uso)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (sku) DO UPDATE 
-                    SET status = EXCLUDED.status, historico_uso = EXCLUDED.historico_uso;
-                ''', (row['SKU'], row['Nome do produto'], row['Tipo de produto'], row['Duração'], row['Status'], row['Histórico de uso']))
+                    INSERT INTO gift_cards (codigo, item) VALUES (%s, %s)
+                    ON CONFLICT (codigo) DO NOTHING;
+                ''', (row['Codigo'], row['Item']))
             except Exception as e:
                 print("Erro ao inserir dados:", e)
         conn.commit()
