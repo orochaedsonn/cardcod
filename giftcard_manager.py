@@ -205,4 +205,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Erro ao processar planilha no início: {str(e)}")
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8001)
+    uvicorn.run(app, host="127.0.0.1", port=8001) 
